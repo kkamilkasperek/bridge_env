@@ -119,7 +119,9 @@ class PbnParser(Parser):
             # game except the first game of the PBN file.
             match = re.fullmatch(self.REPLACE_PATTERN, line)
             if match and not self._in_comment:
-                yield self.parse_board()
+                board = self.parse_board()
+                if board:
+                    yield board
 
                 # initialization
                 self.tag_pair_buffer = list()
@@ -146,7 +148,9 @@ class PbnParser(Parser):
             self.extract_content(line)
 
         if len(self.tag_pair_buffer) != 0:
-            yield self.parse_board()
+            board = self.parse_board()
+            if board:
+                yield board
 
     # TODO: Consider type not IO[str] but IO[AnyStr]
     def parse_all(self, fp: IO[str]) -> List[Dict[str, str]]:

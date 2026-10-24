@@ -192,3 +192,23 @@ class TestPbnParser:
     def test_parse_all(self, path, expected, parser):
         with open(path, 'r') as fp:
             assert parser.parse_all(fp) == expected
+
+    def test_parse_stream_ignores_empty_records(self, parser):
+        pbn = (
+            '% PBN 2.1\n'
+            '\n'
+            '[Board "1"]\n'
+            '[Dealer "N"]\n'
+            '[Vulnerable "None"]\n'
+            '[Deal "N:AKQJ.T98.765.432 2.3.4.5.6 '
+            'T987.654.32.AKQJ A654.KQJ7.AKQJ.T98"]\n'
+            '\n'
+        )
+
+        assert parser.parse_all(pbn.splitlines(keepends=True)) == [{
+            'Board': '1',
+            'Dealer': 'N',
+            'Vulnerable': 'None',
+            'Deal': 'N:AKQJ.T98.765.432 2.3.4.5.6 '
+                    'T987.654.32.AKQJ A654.KQJ7.AKQJ.T98'
+        }]

@@ -1,7 +1,7 @@
 import pytest
 from pytest_mock import MockFixture
 
-from bridge_env import Card, Player, Suit
+from bridge_env import Bid, Card, Player, Suit
 from bridge_env.network_bridge.server import PlayerThread, Server
 
 
@@ -78,3 +78,12 @@ class TestServer:
     ])
     def test_remove_alert_word(self, message, expected):
         assert Server.remove_alert_word(message) == expected
+
+    @pytest.mark.parametrize(('player', 'bid', 'expected'), [
+        (Player.N, Bid.C2, 'North bids 2C'),
+        (Player.E, Bid.Pass, 'East passes'),
+        (Player.S, Bid.X, 'South doubles'),
+        (Player.W, Bid.XX, 'West redoubles'),
+    ])
+    def test_formal_bid_message(self, player, bid, expected):
+        assert Server.formal_bid_message(player, bid) == expected

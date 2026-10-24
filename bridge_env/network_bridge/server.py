@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import datetime
 import logging
 import pathlib
 import random
@@ -20,7 +21,7 @@ from ..data_handler.abstract_classes import BoardSetting, Parser
 from ..data_handler.json_handler.parser import JsonParser
 from ..data_handler.json_handler.writer import JsonLogWriter
 from ..data_handler.pbn_handler.parser import PbnParser
-from ..data_handler.pbn_handler.writer import Scoring
+from ..data_handler.pbn_handler.writer import PbnWriter, Scoring
 from ..playing_phase import PlayingHistory, PlayingPhaseWithHands
 from ..score import calc_score
 
@@ -378,8 +379,8 @@ class Server(SocketInterface):
 
         self.board_settings = board_settings
 
-        if output_file_path.suffix != '.json':
-            raise NotImplementedError('PBN format is not supported.')
+        if output_file_path.suffix not in ('.json', '.pbn'):
+            raise ValueError('Output file must have a .json or .pbn suffix.')
         self.output_file_path = output_file_path
 
         self.sent_message_queues: Dict[Player, Queue] = {Player.N: Queue(),
@@ -470,6 +471,19 @@ class Server(SocketInterface):
     def remove_alert_word(message: str) -> str:
         return re.sub(r'\s+Alert\.\s*', '', message, flags=re.IGNORECASE)
 
+    @staticmethod
+    def formal_bid_message(player: Player, bid: Bid) -> str:
+        """Return the protocol message without alerts or explanations."""
+        if bid is Bid.Pass:
+            action = 'passes'
+        elif bid is Bid.X:
+            action = 'doubles'
+        elif bid is Bid.XX:
+            action = 'redoubles'
+        else:
+            action = f'bids {bid}'
+        return f'{player.formal_name} {action}'
+
     def bidding_phase(self,
                       dealer: Player,
                       vul: Vul) -> Tuple[Contract, List[Bid]]:
@@ -488,6 +502,7 @@ class Server(SocketInterface):
                 # _ = input('Skip alert. [press enter key]')
             bid = MessageInterface.parse_bid(bid_message,
                                              active_player.formal_name)
+            formal_bid_message = self.formal_bid_message(active_player, bid)
             bidding_phase_state = bidding_env.take_bid(bid)
 
             # illegal bid detected
@@ -503,7 +518,7 @@ class Server(SocketInterface):
 
             for player in Player:
                 if player is not active_player:
-                    self.sent_message_queues[player].put(bid_message)
+                    self.sent_message_queues[player].put(formal_bid_message)
 
         contract = bidding_env.contract()
         assert contract is not None
@@ -621,8 +636,12 @@ class Server(SocketInterface):
             self.board_settings) + 1
 
         with open(self.output_file_path, 'w') as fw:
-            game_log_writer = JsonLogWriter(fw)
-            game_log_writer.open()
+            if self.output_file_path.suffix == '.json':
+                game_log_writer = JsonLogWriter(fw)
+                game_log_writer.open()
+            else:
+                game_log_writer = PbnWriter(fw)
+                game_log_writer.write_header()
             for board_number in range(1, max_board_num):
                 cards, vul, dealer, board_id, dda = None, None, None, None, None
                 if self.board_settings is not None:
@@ -672,21 +691,39 @@ class Server(SocketInterface):
                     scores = {declarer.pair: score,
                               declarer.pair.opponent_pair: -score}
 
-                game_log_writer.write(
-                    board_id=board_id,
-                    west_player=ew_team_name,
-                    north_player=ns_team_name,
-                    east_player=ew_team_name,
-                    south_player=ns_team_name,
-                    dealer=dealer,
-                    deal=cards,
-                    scoring=Scoring.IMP,
-                    bid_history=bid_history,
-                    contract=contract,
-                    play_history=play_history,
-                    taken_trick_num=taken_trick_num,
-                    scores=scores,
-                    dda=dda)
+                if self.output_file_path.suffix == '.json':
+                    game_log_writer.write(
+                        board_id=board_id,
+                        west_player=ew_team_name,
+                        north_player=ns_team_name,
+                        east_player=ew_team_name,
+                        south_player=ns_team_name,
+                        dealer=dealer,
+                        deal=cards,
+                        scoring=Scoring.IMP,
+                        bid_history=bid_history,
+                        contract=contract,
+                        play_history=play_history,
+                        taken_trick_num=taken_trick_num,
+                        scores=scores,
+                        dda=dda)
+                else:
+                    if board_number > 1:
+                        game_log_writer.write_line('\n')
+                    game_log_writer.write_board_result(
+                        event='bridge_env',
+                        site='',
+                        date=datetime.date.today(),
+                        board_num=int(board_id),
+                        west_player=ew_team_name,
+                        north_player=ns_team_name,
+                        east_player=ew_team_name,
+                        south_player=ns_team_name,
+                        dealer=dealer,
+                        deal=cards,
+                        scoring=Scoring.IMP,
+                        contract=contract,
+                        taken_tricks=taken_trick_num)
 
                 if board_number == max_board_num - 1:
                     break
@@ -695,7 +732,8 @@ class Server(SocketInterface):
                     self.sent_message_queues[player].put(
                         self.Message.NEXT_BOARD)
 
-            game_log_writer.close()
+            if self.output_file_path.suffix == '.json':
+                game_log_writer.close()
             for player in Player:
                 self.sent_message_queues[player].put(self.Message.END_SESSION)
 
